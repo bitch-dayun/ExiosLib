@@ -52,7 +52,7 @@ function Desync:_updateLoop()
     hrp.CFrame = self._targetCFrame
     hrp.AssemblyLinearVelocity = forceVelocity
     
-    RunService.Heartbeat:Wait()
+    RunService.RenderStepped:Wait()
     
     hrp.CFrame = self._backedUpCFrames[hrp]
     hrp.AssemblyLinearVelocity = self._realVelocity
