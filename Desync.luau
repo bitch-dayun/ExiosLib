@@ -8,9 +8,9 @@ local LocalPlayer = Players.LocalPlayer
 function Desync.new()
     local self = setmetatable({}, Desync)
     
+	self._isShouldClean = false
     self._targetCFrame = nil
     self._backedUpCFrames = {}
-    self._realVelocity = nil
     self._isActive = false
     self._connection = nil
     self._oldIndex = nil
@@ -19,20 +19,41 @@ function Desync.new()
 end
 
 function Desync:SetTarget(cframe)
+	self._backedUpCFrames = {}
     self._targetCFrame = cframe
 end
 
 function Desync:ClearTarget()
     self._targetCFrame = nil
+	self._isShouldClean = true
 end
 
 function Desync:_updateLoop()
-    if not self._targetCFrame then return end
+    if not self._targetCFrame then
+		if self._isShouldClean then
+			self._isShouldClean = false
+			local character = LocalPlayer.Character
+			local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+			local hrp = character and character:FindFirstChild("HumanoidRootPart")
+			
+			local shouldMove = hrp.AssemblyLinearVelocity.Magnitude < 0.01
+			
+			if shouldMove then
+				local rv = Vector3.new(math.random(-1, 1)/100, math.random(-1, 1)/100, math.random(-1, 1)/100)
+				humanoid:Move(rv, true)
+			end
+		end
+		return
+	end
     
     local character = LocalPlayer.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
     local hrp = character and character:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
+    if not hrp or not humanoid then return end
     
+    if not self._backedUpCFrames then
+        self._backedUpCFrames = {}
+    end
     table.clear(self._backedUpCFrames)
     
     for _, part in ipairs(character:GetDescendants()) do
@@ -41,21 +62,17 @@ function Desync:_updateLoop()
         end
     end
     
-    self._realVelocity = hrp.AssemblyLinearVelocity
-    
-    local forceVelocity = Vector3.new(0, -338, 0) + Vector3.new(
-        math.random(-10, 10) / 100, 
-        0, 
-        math.random(-10, 10) / 100
-    )
-
+	local shouldMove = hrp.AssemblyLinearVelocity.Magnitude < 0.01
+	
     hrp.CFrame = self._targetCFrame
-    hrp.AssemblyLinearVelocity = forceVelocity
-    
-    RunService.RenderStepped:Wait()
-    
+
+    RunService.PreRender:Wait()
+    if shouldMove then
+		local rv = Vector3.new(math.random(-1, 1)/100, math.random(-1, 1)/100, math.random(-1, 1)/100)
+		humanoid:Move(rv, true)
+	end
+	
     hrp.CFrame = self._backedUpCFrames[hrp]
-    hrp.AssemblyLinearVelocity = self._realVelocity
 end
 
 function Desync:_hookMetatable()
@@ -68,17 +85,28 @@ function Desync:_hookMetatable()
     mt.__index = newcclosure(function(obj, key)
         if not checkcaller() and selfRef._targetCFrame and key == "CFrame" then
             local character = LocalPlayer.Character
-            local hum = character and character:FindFirstChild("Humanoid")
-            
-            if hum and hum.Health > 0 then
-                local backedUpCFrame = selfRef._backedUpCFrames[obj]
-                if backedUpCFrame then
-                    return backedUpCFrame
+
+            if character then
+                local hum = character:FindFirstChild("Humanoid")
+                
+                if hum and hum.Health > 0 then
+					if not selfRef._backedUpCFrames then print("NO") end
+					local backedUpCFrame = selfRef._backedUpCFrames and selfRef._backedUpCFrames[obj]
+					if backedUpCFrame then
+						return backedUpCFrame
+					end
                 end
             end
         end
         
-        return selfRef._oldIndex(obj, key)
+        if selfRef._oldIndex then
+            local success, result = pcall(selfRef._oldIndex, obj, key)
+            if success then
+                return result
+            end
+        end
+        
+        return nil
     end)
     
     setreadonly(mt, true)
@@ -109,8 +137,10 @@ function Desync:Stop()
     if not self._isActive then return end
     self._isActive = false
     self._targetCFrame = nil
-    self._realVelocity = nil
-    table.clear(self._backedUpCFrames)
+    
+    if self._backedUpCFrames then
+        table.clear(self._backedUpCFrames)
+    end
     
     if self._connection then
         self._connection:Disconnect()
